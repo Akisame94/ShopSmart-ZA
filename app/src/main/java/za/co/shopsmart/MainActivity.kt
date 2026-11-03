@@ -105,7 +105,7 @@ fun ShopSmartApp() {
     }
 
     val estimatedTotal = shopping
-        .filter { !it.bought }
+        .filter { it.bought }
         .sumOf { it.priceCents * it.quantity }
 
     Scaffold(
