@@ -6,6 +6,8 @@ import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,10 +26,20 @@ import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.Date
 
+private const val PROMO_NONE = "NONE"
+private const val PROMO_UNIT = "UNIT"
+private const val PROMO_COMBO = "COMBO"
+
 data class Product(
     val id: Long,
     val name: String,
-    val priceCents: Int
+    val priceCents: Int,
+    val brand: String = "",
+    val unit: String = "",
+    val promoType: String = PROMO_NONE,
+    val promoPriceCents: Int = 0,
+    val comboQuantity: Int = 2,
+    val comboPriceCents: Int = 0
 )
 
 data class ShoppingEntry(
@@ -36,7 +48,15 @@ data class ShoppingEntry(
     val name: String,
     val priceCents: Int,
     val quantity: Int,
-    val bought: Boolean
+    val bought: Boolean,
+    val brand: String = "",
+    val unit: String = "",
+    val promoType: String = PROMO_NONE,
+    val promoPriceCents: Int = 0,
+    val comboQuantity: Int = 2,
+    val comboPriceCents: Int = 0,
+    val promotionApplied: Boolean = false,
+    val actualPaidCents: Int? = null
 )
 
 data class PurchaseRecord(
@@ -59,6 +79,48 @@ class MainActivity : ComponentActivity() {
                 ShopSmartApp()
             }
         }
+    }
+}
+
+fun promotionDescription(product: Product): String {
+    return when (product.promoType) {
+        PROMO_UNIT -> "Special: ${formatRand(product.promoPriceCents)} each"
+        PROMO_COMBO -> "${product.comboQuantity} for ${formatRand(product.comboPriceCents)}"
+        else -> "No promotion"
+    }
+}
+
+fun promotionDescription(entry: ShoppingEntry): String {
+    return when (entry.promoType) {
+        PROMO_UNIT -> "Special: ${formatRand(entry.promoPriceCents)} each"
+        PROMO_COMBO -> "${entry.comboQuantity} for ${formatRand(entry.comboPriceCents)}"
+        else -> "No promotion"
+    }
+}
+
+fun calculateLineTotal(entry: ShoppingEntry): Int {
+    return when (entry.promoType) {
+        PROMO_UNIT -> {
+            if (entry.promoPriceCents > 0) {
+                entry.promoPriceCents * entry.quantity
+            } else {
+                entry.priceCents * entry.quantity
+            }
+        }
+
+        PROMO_COMBO -> {
+            if (entry.comboQuantity >= 2 && entry.comboPriceCents > 0) {
+                val bundles = entry.quantity / entry.comboQuantity
+                val remaining = entry.quantity % entry.comboQuantity
+
+                (bundles * entry.comboPriceCents) +
+                    (remaining * entry.priceCents)
+            } else {
+                entry.priceCents * entry.quantity
+            }
+        }
+
+        else -> entry.priceCents * entry.quantity
     }
 }
 
@@ -85,13 +147,58 @@ fun ShopSmartApp() {
     }
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showProductDialog by remember { mutableStateOf(false) }
+    var editingProduct by remember { mutableStateOf<Product?>(null) }
     var selectedPurchase by remember { mutableStateOf<Long?>(null) }
 
     fun saveAll() {
         saveProducts(context, products)
         saveShopping(context, shopping)
         saveHistory(context, history)
+    }
+
+    fun productFromEntry(entry: ShoppingEntry): Product {
+        return Product(
+            id = entry.productId,
+            name = entry.name,
+            priceCents = entry.priceCents,
+            brand = entry.brand,
+            unit = entry.unit,
+            promoType = entry.promoType,
+            promoPriceCents = entry.promoPriceCents,
+            comboQuantity = entry.comboQuantity,
+            comboPriceCents = entry.comboPriceCents
+        )
+    }
+
+    fun updateProduct(updated: Product) {
+        val index = products.indexOfFirst { it.id == updated.id }
+
+        if (index >= 0) {
+            products[index] = updated
+        } else {
+            products.add(updated)
+        }
+
+        // Keep all active shopping entries in sync with the catalogue.
+        shopping.indices.forEach { i ->
+            val entry = shopping[i]
+
+            if (entry.productId == updated.id) {
+                shopping[i] = entry.copy(
+                    name = updated.name,
+                    priceCents = updated.priceCents,
+                    brand = updated.brand,
+                    unit = updated.unit,
+                    promoType = updated.promoType,
+                    promoPriceCents = updated.promoPriceCents,
+                    comboQuantity = updated.comboQuantity,
+                    comboPriceCents = updated.comboPriceCents
+                )
+            }
+        }
+
+        saveAll()
     }
 
     fun addToShopping(product: Product) {
@@ -111,7 +218,13 @@ fun ShopSmartApp() {
                     name = product.name,
                     priceCents = product.priceCents,
                     quantity = 1,
-                    bought = false
+                    bought = false,
+                    brand = product.brand,
+                    unit = product.unit,
+                    promoType = product.promoType,
+                    promoPriceCents = product.promoPriceCents,
+                    comboQuantity = product.comboQuantity,
+                    comboPriceCents = product.comboPriceCents
                 )
             )
         }
@@ -123,8 +236,15 @@ fun ShopSmartApp() {
         val boughtItems = shopping.filter { it.bought }
 
         if (boughtItems.isNotEmpty()) {
-            val total = boughtItems.sumOf {
-                it.priceCents * it.quantity
+            val savedItems = boughtItems.map { entry ->
+                entry.copy(
+                    promotionApplied = entry.promoType != PROMO_NONE,
+                    actualPaidCents = calculateLineTotal(entry)
+                )
+            }
+
+            val total = savedItems.sumOf {
+                it.actualPaidCents ?: calculateLineTotal(it)
             }
 
             history.add(
@@ -132,20 +252,19 @@ fun ShopSmartApp() {
                 PurchaseRecord(
                     id = System.nanoTime(),
                     timestamp = System.currentTimeMillis(),
-                    items = boughtItems.toList(),
+                    items = savedItems,
                     totalCents = total
                 )
             )
 
             shopping.removeAll { it.bought }
-
             saveAll()
         }
     }
 
     val estimatedTotal = shopping
         .filter { it.bought }
-        .sumOf { it.priceCents * it.quantity }
+        .sumOf { calculateLineTotal(it) }
 
     Scaffold(
         topBar = {
@@ -199,7 +318,7 @@ fun ShopSmartApp() {
 
             when (selectedTab) {
 
-                // SHOPPING LIST
+                // SHOPPING
                 0 -> {
                     Column(Modifier.fillMaxSize()) {
 
@@ -271,9 +390,7 @@ fun ShopSmartApp() {
 
                                                         if (index >= 0) {
                                                             shopping[index] =
-                                                                entry.copy(
-                                                                    bought = checked
-                                                                )
+                                                                entry.copy(bought = checked)
                                                             saveAll()
                                                         }
                                                     }
@@ -286,16 +403,32 @@ fun ShopSmartApp() {
                                                         entry.name,
                                                         style = MaterialTheme.typography.titleMedium
                                                     )
+
+                                                    if (entry.brand.isNotBlank()) {
+                                                        Text("Brand: ${entry.brand}")
+                                                    }
+
+                                                    if (entry.unit.isNotBlank()) {
+                                                        Text("Unit: ${entry.unit}")
+                                                    }
+
                                                     Text(
-                                                        "${formatRand(entry.priceCents)} each"
+                                                        "Normal price: ${formatRand(entry.priceCents)}",
+                                                        style = MaterialTheme.typography.bodySmall
                                                     )
+
+                                                    if (entry.promoType != PROMO_NONE) {
+                                                        Text(
+                                                            promotionDescription(entry),
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            style = MaterialTheme.typography.bodyMedium
+                                                        )
+                                                    }
                                                 }
 
                                                 Text(
-                                                    formatRand(
-                                                        entry.priceCents *
-                                                            entry.quantity
-                                                    )
+                                                    formatRand(calculateLineTotal(entry)),
+                                                    style = MaterialTheme.typography.titleMedium
                                                 )
                                             }
 
@@ -316,8 +449,7 @@ fun ShopSmartApp() {
                                                         if (entry.quantity > 1) {
                                                             shopping[index] =
                                                                 entry.copy(
-                                                                    quantity =
-                                                                        entry.quantity - 1
+                                                                    quantity = entry.quantity - 1
                                                                 )
                                                         } else {
                                                             shopping.removeAt(index)
@@ -337,13 +469,19 @@ fun ShopSmartApp() {
                                                     if (index >= 0) {
                                                         shopping[index] =
                                                             entry.copy(
-                                                                quantity =
-                                                                    entry.quantity + 1
+                                                                quantity = entry.quantity + 1
                                                             )
                                                         saveAll()
                                                     }
                                                 }) {
                                                     Text("+")
+                                                }
+
+                                                TextButton(onClick = {
+                                                    editingProduct = productFromEntry(entry)
+                                                    showProductDialog = true
+                                                }) {
+                                                    Text("Edit")
                                                 }
 
                                                 TextButton(onClick = {
@@ -358,7 +496,7 @@ fun ShopSmartApp() {
 
                                             if (entry.bought) {
                                                 Text(
-                                                    "Bought",
+                                                    "Marked as bought",
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
                                             }
@@ -381,7 +519,7 @@ fun ShopSmartApp() {
                     }
                 }
 
-                // PRODUCT CATALOGUE
+                // CATALOGUE
                 1 -> {
                     Column(Modifier.fillMaxSize()) {
 
@@ -398,7 +536,8 @@ fun ShopSmartApp() {
                             )
 
                             Button(onClick = {
-                                showAddDialog = true
+                                editingProduct = null
+                                showProductDialog = true
                             }) {
                                 Text("Add Product")
                             }
@@ -422,34 +561,56 @@ fun ShopSmartApp() {
                                                 vertical = 5.dp
                                             )
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalAlignment =
-                                                Alignment.CenterVertically
-                                        ) {
-                                            Column(
-                                                Modifier.weight(1f)
-                                            ) {
+                                        Column(Modifier.padding(12.dp)) {
+
+                                            Text(
+                                                product.name,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+
+                                            if (product.brand.isNotBlank()) {
+                                                Text("Brand: ${product.brand}")
+                                            }
+
+                                            if (product.unit.isNotBlank()) {
+                                                Text("Unit: ${product.unit}")
+                                            }
+
+                                            Text("Normal price: ${formatRand(product.priceCents)}")
+
+                                            if (product.promoType != PROMO_NONE) {
                                                 Text(
-                                                    product.name,
-                                                    style = MaterialTheme.typography.titleMedium
+                                                    promotionDescription(product),
+                                                    color = MaterialTheme.colorScheme.primary
                                                 )
-                                                Text(formatRand(product.priceCents))
                                             }
 
-                                            TextButton(onClick = {
-                                                addToShopping(product)
-                                            }) {
-                                                Text("Add to list")
-                                            }
-
-                                            TextButton(onClick = {
-                                                products.removeAll {
-                                                    it.id == product.id
+                                            Row(
+                                                horizontalArrangement =
+                                                    Arrangement.End,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                TextButton(onClick = {
+                                                    addToShopping(product)
+                                                }) {
+                                                    Text("Add to list")
                                                 }
-                                                saveAll()
-                                            }) {
-                                                Text("Delete")
+
+                                                TextButton(onClick = {
+                                                    editingProduct = product
+                                                    showProductDialog = true
+                                                }) {
+                                                    Text("Edit")
+                                                }
+
+                                                TextButton(onClick = {
+                                                    products.removeAll {
+                                                        it.id == product.id
+                                                    }
+                                                    saveAll()
+                                                }) {
+                                                    Text("Delete")
+                                                }
                                             }
                                         }
                                     }
@@ -509,11 +670,8 @@ fun ShopSmartApp() {
                                                     if (expanded) null else record.id
                                             }) {
                                                 Text(
-                                                    if (expanded) {
-                                                        "Hide items"
-                                                    } else {
-                                                        "View items"
-                                                    }
+                                                    if (expanded) "Hide items"
+                                                    else "View items"
                                                 )
                                             }
 
@@ -521,22 +679,34 @@ fun ShopSmartApp() {
                                                 HorizontalDivider()
 
                                                 record.items.forEach { item ->
-                                                    Row(
+                                                    Column(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
-                                                            .padding(vertical = 5.dp),
-                                                        horizontalArrangement =
-                                                            Arrangement.SpaceBetween
+                                                            .padding(vertical = 5.dp)
                                                     ) {
-                                                        Text(
-                                                            "${item.name} x${item.quantity}"
-                                                        )
-                                                        Text(
-                                                            formatRand(
-                                                                item.priceCents *
-                                                                    item.quantity
+                                                        Row(
+                                                            horizontalArrangement =
+                                                                Arrangement.SpaceBetween,
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        ) {
+                                                            Text(
+                                                                "${item.name} x${item.quantity}"
                                                             )
-                                                        )
+                                                            Text(
+                                                                formatRand(
+                                                                    item.actualPaidCents
+                                                                        ?: calculateLineTotal(item)
+                                                                )
+                                                            )
+                                                        }
+
+                                                        if (item.promotionApplied) {
+                                                            Text(
+                                                                "Promotion applied: ${promotionDescription(item)}",
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
@@ -559,24 +729,261 @@ fun ShopSmartApp() {
         }
     }
 
-    if (showAddDialog) {
-        AddProductDialog(
+    if (showProductDialog) {
+        ProductEditorDialog(
+            initialProduct = editingProduct,
             onDismiss = {
-                showAddDialog = false
+                showProductDialog = false
+                editingProduct = null
             },
-            onAdd = { name, price ->
-                products.add(
-                    Product(
-                        id = System.nanoTime(),
-                        name = name,
-                        priceCents = price
-                    )
-                )
-                saveAll()
-                showAddDialog = false
+            onSave = { updated ->
+                updateProduct(updated)
+                showProductDialog = false
+                editingProduct = null
             }
         )
     }
+}
+
+@Composable
+fun ProductEditorDialog(
+    initialProduct: Product?,
+    onDismiss: () -> Unit,
+    onSave: (Product) -> Unit
+) {
+    var name by remember(initialProduct?.id) {
+        mutableStateOf(initialProduct?.name ?: "")
+    }
+
+    var brand by remember(initialProduct?.id) {
+        mutableStateOf(initialProduct?.brand ?: "")
+    }
+
+    var unit by remember(initialProduct?.id) {
+        mutableStateOf(initialProduct?.unit ?: "")
+    }
+
+    var price by remember(initialProduct?.id) {
+        mutableStateOf(
+            initialProduct?.let {
+                String.format(Locale.US, "%.2f", it.priceCents / 100.0)
+            } ?: ""
+        )
+    }
+
+    var promoType by remember(initialProduct?.id) {
+        mutableStateOf(initialProduct?.promoType ?: PROMO_NONE)
+    }
+
+    var promoPrice by remember(initialProduct?.id) {
+        mutableStateOf(
+            initialProduct?.let {
+                if (it.promoPriceCents > 0) {
+                    String.format(Locale.US, "%.2f", it.promoPriceCents / 100.0)
+                } else ""
+            } ?: ""
+        )
+    }
+
+    var comboQuantity by remember(initialProduct?.id) {
+        mutableStateOf(
+            initialProduct?.comboQuantity?.toString() ?: "2"
+        )
+    }
+
+    var comboPrice by remember(initialProduct?.id) {
+        mutableStateOf(
+            initialProduct?.let {
+                if (it.comboPriceCents > 0) {
+                    String.format(Locale.US, "%.2f", it.comboPriceCents / 100.0)
+                } else ""
+            } ?: ""
+        )
+    }
+
+    var error by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(if (initialProduct == null) "Add a product" else "Edit product")
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Product name") },
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = brand,
+                    onValueChange = { brand = it },
+                    label = { Text("Brand name") },
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = unit,
+                    onValueChange = { unit = it },
+                    label = { Text("Unit of measure (e.g. 2 L, 500 g, each)") },
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = { price = it },
+                    label = { Text("Normal price in Rand") },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Decimal
+                    ),
+                    singleLine = true
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    "Promotion type",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = promoType == PROMO_NONE,
+                        onClick = { promoType = PROMO_NONE }
+                    )
+                    Text("None")
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = promoType == PROMO_UNIT,
+                        onClick = { promoType = PROMO_UNIT }
+                    )
+                    Text("Special price per item")
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = promoType == PROMO_COMBO,
+                        onClick = { promoType = PROMO_COMBO }
+                    )
+                    Text("Combo deal (e.g. 2 for R100)")
+                }
+
+                if (promoType == PROMO_UNIT) {
+                    OutlinedTextField(
+                        value = promoPrice,
+                        onValueChange = { promoPrice = it },
+                        label = { Text("Promotional price per item (R)") },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Decimal
+                        ),
+                        singleLine = true
+                    )
+                }
+
+                if (promoType == PROMO_COMBO) {
+                    OutlinedTextField(
+                        value = comboQuantity,
+                        onValueChange = { comboQuantity = it },
+                        label = { Text("Number of items in combo (e.g. 2)") },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = comboPrice,
+                        onValueChange = { comboPrice = it },
+                        label = { Text("Total combo price in Rand (e.g. 100)") },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Decimal
+                        ),
+                        singleLine = true
+                    )
+
+                    Text(
+                        "Example: 2 for R100. Any extra items are charged at the normal price.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                if (error.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val normalCents = parsePriceCents(price)
+                val specialCents = parsePriceCents(promoPrice)
+                val comboCents = parsePriceCents(comboPrice)
+                val comboQty = comboQuantity.toIntOrNull()
+
+                when {
+                    name.isBlank() -> {
+                        error = "Please enter a product name."
+                    }
+
+                    normalCents == null || normalCents <= 0 -> {
+                        error = "Enter a valid normal price greater than zero."
+                    }
+
+                    promoType == PROMO_UNIT &&
+                        (specialCents == null || specialCents <= 0) -> {
+                        error = "Enter a valid promotional price."
+                    }
+
+                    promoType == PROMO_COMBO &&
+                        (comboQty == null || comboQty < 2) -> {
+                        error = "Combo quantity must be at least 2."
+                    }
+
+                    promoType == PROMO_COMBO &&
+                        (comboCents == null || comboCents <= 0) -> {
+                        error = "Enter a valid combo price."
+                    }
+
+                    else -> {
+                        onSave(
+                            Product(
+                                id = initialProduct?.id ?: System.nanoTime(),
+                                name = name.trim(),
+                                priceCents = normalCents,
+                                brand = brand.trim(),
+                                unit = unit.trim(),
+                                promoType = promoType,
+                                promoPriceCents =
+                                    if (promoType == PROMO_UNIT) specialCents ?: 0 else 0,
+                                comboQuantity =
+                                    if (promoType == PROMO_COMBO) comboQty ?: 2 else 2,
+                                comboPriceCents =
+                                    if (promoType == PROMO_COMBO) comboCents ?: 0 else 0
+                            )
+                        )
+                    }
+                }
+            }) {
+                Text("Save Product")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -598,7 +1005,7 @@ fun PriceTrackingScreen(
         )
 
         Text(
-            "See how the prices you pay change over time.",
+            "Only normal-price purchases are included. Promotional purchases are excluded.",
             modifier = Modifier.padding(horizontal = 16.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -619,7 +1026,10 @@ fun PriceTrackingScreen(
                     val purchases = history
                         .flatMap { record ->
                             record.items
-                                .filter { it.productId == product.id }
+                                .filter {
+                                    it.productId == product.id &&
+                                        !it.promotionApplied
+                                }
                                 .map { item ->
                                     ProductPricePurchase(
                                         timestamp = record.timestamp,
@@ -646,16 +1056,21 @@ fun PriceTrackingScreen(
                                 style = MaterialTheme.typography.titleLarge
                             )
 
+                            if (product.brand.isNotBlank()) {
+                                Text("Brand: ${product.brand}")
+                            }
+
+                            if (product.unit.isNotBlank()) {
+                                Text("Unit: ${product.unit}")
+                            }
+
                             Spacer(Modifier.height(8.dp))
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
-                                    "Catalogue price",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text("Current normal price")
                                 Text(
                                     formatRand(product.priceCents),
                                     style = MaterialTheme.typography.titleMedium
@@ -668,13 +1083,10 @@ fun PriceTrackingScreen(
 
                             if (purchases.isEmpty()) {
 
-                                Text(
-                                    "No purchase history yet.",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text("No normal-price purchase history yet.")
 
                                 Text(
-                                    "Save a purchase containing this product to start tracking its price.",
+                                    "Promotional purchases do not count towards normal price tracking.",
                                     style = MaterialTheme.typography.bodySmall
                                 )
 
@@ -686,7 +1098,7 @@ fun PriceTrackingScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text("Last price paid")
+                                    Text("Last normal price paid")
                                     Text(
                                         formatRand(latest.priceCents),
                                         style = MaterialTheme.typography.titleMedium
@@ -711,17 +1123,9 @@ fun PriceTrackingScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text("Previous price")
+                                        Text("Previous normal price")
                                         Text(formatRand(previous.priceCents))
                                     }
-
-                                    Text(
-                                        "Previous purchase: ${formatDate(previous.timestamp)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-
-                                    Spacer(Modifier.height(8.dp))
 
                                     when {
                                         difference > 0 -> {
@@ -751,7 +1155,7 @@ fun PriceTrackingScreen(
 
                                 } else {
                                     Text(
-                                        "A second purchase is needed to compare prices.",
+                                        "A second normal-price purchase is needed to compare prices.",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         style = MaterialTheme.typography.bodySmall
                                     )
@@ -760,7 +1164,7 @@ fun PriceTrackingScreen(
                                 Spacer(Modifier.height(10.dp))
 
                                 Text(
-                                    "Recorded purchases: ${purchases.size}",
+                                    "Normal-price purchases recorded: ${purchases.size}",
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
@@ -772,78 +1176,19 @@ fun PriceTrackingScreen(
     }
 }
 
-@Composable
-fun AddProductDialog(
-    onDismiss: () -> Unit,
-    onAdd: (String, Int) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var price by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf("") }
+fun parsePriceCents(value: String): Int? {
+    return try {
+        val parsed = value.trim()
+            .replace(",", ".")
+            .toBigDecimalOrNull()
+            ?: return null
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add a product") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Product name") },
-                    singleLine = true
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = price,
-                    onValueChange = { price = it },
-                    label = { Text("Price in Rand (e.g. 25.99)") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Decimal
-                    ),
-                    singleLine = true
-                )
-
-                if (error.isNotEmpty()) {
-                    Text(
-                        error,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = {
-                val parsed = price.trim()
-                    .replace(",", ".")
-                    .toBigDecimalOrNull()
-
-                if (name.isBlank()) {
-                    error = "Please enter a product name."
-                } else if (
-                    parsed == null ||
-                    parsed <= BigDecimal.ZERO
-                ) {
-                    error = "Please enter a valid price greater than zero."
-                } else {
-                    val cents = parsed
-                        .movePointRight(2)
-                        .setScale(0, RoundingMode.HALF_UP)
-                        .toInt()
-
-                    onAdd(name.trim(), cents)
-                }
-            }) {
-                Text("Save Product")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
+        parsed.movePointRight(2)
+            .setScale(0, RoundingMode.HALF_UP)
+            .intValueExact()
+    } catch (_: Exception) {
+        null
+    }
 }
 
 fun formatRand(cents: Int): String {
@@ -872,10 +1217,17 @@ fun loadProducts(context: Context): List<Product> {
 
         (0 until array.length()).map { i ->
             val item = array.getJSONObject(i)
+
             Product(
-                item.getLong("id"),
-                item.getString("name"),
-                item.getInt("price")
+                id = item.getLong("id"),
+                name = item.getString("name"),
+                priceCents = item.getInt("price"),
+                brand = item.optString("brand", ""),
+                unit = item.optString("unit", ""),
+                promoType = item.optString("promoType", PROMO_NONE),
+                promoPriceCents = item.optInt("promoPrice", 0),
+                comboQuantity = item.optInt("comboQuantity", 2),
+                comboPriceCents = item.optInt("comboPrice", 0)
             )
         }
     } catch (_: Exception) {
@@ -894,13 +1246,25 @@ fun loadShopping(context: Context): List<ShoppingEntry> {
 
         (0 until array.length()).map { i ->
             val item = array.getJSONObject(i)
+
             ShoppingEntry(
-                item.getLong("id"),
-                item.getLong("productId"),
-                item.getString("name"),
-                item.getInt("price"),
-                item.getInt("quantity"),
-                item.getBoolean("bought")
+                id = item.getLong("id"),
+                productId = item.getLong("productId"),
+                name = item.getString("name"),
+                priceCents = item.getInt("price"),
+                quantity = item.getInt("quantity"),
+                bought = item.getBoolean("bought"),
+                brand = item.optString("brand", ""),
+                unit = item.optString("unit", ""),
+                promoType = item.optString("promoType", PROMO_NONE),
+                promoPriceCents = item.optInt("promoPrice", 0),
+                comboQuantity = item.optInt("comboQuantity", 2),
+                comboPriceCents = item.optInt("comboPrice", 0),
+                promotionApplied = item.optBoolean("promotionApplied", false),
+                actualPaidCents =
+                    if (item.has("actualPaid") && !item.isNull("actualPaid")) {
+                        item.optInt("actualPaid")
+                    } else null
             )
         }
     } catch (_: Exception) {
@@ -923,21 +1287,33 @@ fun loadHistory(context: Context): List<PurchaseRecord> {
 
             val savedItems = (0 until itemArray.length()).map { j ->
                 val item = itemArray.getJSONObject(j)
+
                 ShoppingEntry(
-                    item.getLong("id"),
-                    item.getLong("productId"),
-                    item.getString("name"),
-                    item.getInt("price"),
-                    item.getInt("quantity"),
-                    item.getBoolean("bought")
+                    id = item.getLong("id"),
+                    productId = item.getLong("productId"),
+                    name = item.getString("name"),
+                    priceCents = item.getInt("price"),
+                    quantity = item.getInt("quantity"),
+                    bought = item.getBoolean("bought"),
+                    brand = item.optString("brand", ""),
+                    unit = item.optString("unit", ""),
+                    promoType = item.optString("promoType", PROMO_NONE),
+                    promoPriceCents = item.optInt("promoPrice", 0),
+                    comboQuantity = item.optInt("comboQuantity", 2),
+                    comboPriceCents = item.optInt("comboPrice", 0),
+                    promotionApplied = item.optBoolean("promotionApplied", false),
+                    actualPaidCents =
+                        if (item.has("actualPaid") && !item.isNull("actualPaid")) {
+                            item.optInt("actualPaid")
+                        } else null
                 )
             }
 
             PurchaseRecord(
-                record.getLong("id"),
-                record.getLong("timestamp"),
-                savedItems,
-                record.getInt("total")
+                id = record.getLong("id"),
+                timestamp = record.getLong("timestamp"),
+                items = savedItems,
+                totalCents = record.getInt("total")
             )
         }
     } catch (_: Exception) {
@@ -954,6 +1330,12 @@ fun saveProducts(context: Context, products: List<Product>) {
                 put("id", product.id)
                 put("name", product.name)
                 put("price", product.priceCents)
+                put("brand", product.brand)
+                put("unit", product.unit)
+                put("promoType", product.promoType)
+                put("promoPrice", product.promoPriceCents)
+                put("comboQuantity", product.comboQuantity)
+                put("comboPrice", product.comboPriceCents)
             }
         )
     }
@@ -981,6 +1363,19 @@ fun saveShopping(
                 put("price", entry.priceCents)
                 put("quantity", entry.quantity)
                 put("bought", entry.bought)
+                put("brand", entry.brand)
+                put("unit", entry.unit)
+                put("promoType", entry.promoType)
+                put("promoPrice", entry.promoPriceCents)
+                put("comboQuantity", entry.comboQuantity)
+                put("comboPrice", entry.comboPriceCents)
+                put("promotionApplied", entry.promotionApplied)
+
+                if (entry.actualPaidCents != null) {
+                    put("actualPaid", entry.actualPaidCents)
+                } else {
+                    put("actualPaid", JSONObject.NULL)
+                }
             }
         )
     }
@@ -1012,6 +1407,19 @@ fun saveHistory(
                     put("price", item.priceCents)
                     put("quantity", item.quantity)
                     put("bought", item.bought)
+                    put("brand", item.brand)
+                    put("unit", item.unit)
+                    put("promoType", item.promoType)
+                    put("promoPrice", item.promoPriceCents)
+                    put("comboQuantity", item.comboQuantity)
+                    put("comboPrice", item.comboPriceCents)
+                    put("promotionApplied", item.promotionApplied)
+
+                    if (item.actualPaidCents != null) {
+                        put("actualPaid", item.actualPaidCents)
+                    } else {
+                        put("actualPaid", JSONObject.NULL)
+                    }
                 }
             )
         }
