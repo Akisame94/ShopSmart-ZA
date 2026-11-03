@@ -1,3 +1,4 @@
+
 package za.co.shopsmart
 
 import android.os.Bundle
@@ -43,6 +44,11 @@ data class PurchaseRecord(
     val timestamp: Long,
     val items: List<ShoppingEntry>,
     val totalCents: Int
+)
+
+data class ProductPricePurchase(
+    val timestamp: Long,
+    val priceCents: Int
 )
 
 class MainActivity : ComponentActivity() {
@@ -168,7 +174,7 @@ fun ShopSmartApp() {
                 .padding(padding)
         ) {
 
-            TabRow(selectedTabIndex = selectedTab) {
+            ScrollableTabRow(selectedTabIndex = selectedTab) {
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
@@ -184,10 +190,16 @@ fun ShopSmartApp() {
                     onClick = { selectedTab = 2 },
                     text = { Text("History") }
                 )
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    text = { Text("Price Tracking") }
+                )
             }
 
             when (selectedTab) {
 
+                // SHOPPING LIST
                 0 -> {
                     Column(Modifier.fillMaxSize()) {
 
@@ -369,6 +381,7 @@ fun ShopSmartApp() {
                     }
                 }
 
+                // PRODUCT CATALOGUE
                 1 -> {
                     Column(Modifier.fillMaxSize()) {
 
@@ -446,6 +459,7 @@ fun ShopSmartApp() {
                     }
                 }
 
+                // PURCHASE HISTORY
                 2 -> {
                     Column(Modifier.fillMaxSize()) {
 
@@ -533,6 +547,14 @@ fun ShopSmartApp() {
                         }
                     }
                 }
+
+                // PRICE TRACKING
+                3 -> {
+                    PriceTrackingScreen(
+                        products = products,
+                        history = history
+                    )
+                }
             }
         }
     }
@@ -554,6 +576,199 @@ fun ShopSmartApp() {
                 showAddDialog = false
             }
         )
+    }
+}
+
+@Composable
+fun PriceTrackingScreen(
+    products: List<Product>,
+    history: List<PurchaseRecord>
+) {
+    Column(Modifier.fillMaxSize()) {
+
+        Text(
+            "Product Price Tracking",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(
+                start = 16.dp,
+                top = 16.dp,
+                end = 16.dp,
+                bottom = 4.dp
+            )
+        )
+
+        Text(
+            "See how the prices you pay change over time.",
+            modifier = Modifier.padding(horizontal = 16.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (products.isEmpty()) {
+            Text(
+                "Add products to your catalogue to start tracking their prices.",
+                modifier = Modifier.padding(20.dp)
+            )
+        } else {
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 16.dp)
+            ) {
+                items(products, key = { it.id }) { product ->
+
+                    val purchases = history
+                        .flatMap { record ->
+                            record.items
+                                .filter { it.productId == product.id }
+                                .map { item ->
+                                    ProductPricePurchase(
+                                        timestamp = record.timestamp,
+                                        priceCents = item.priceCents
+                                    )
+                                }
+                        }
+                        .sortedByDescending { it.timestamp }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = 12.dp,
+                                vertical = 6.dp
+                            )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+
+                            Text(
+                                product.name,
+                                style = MaterialTheme.typography.titleLarge
+                            )
+
+                            Spacer(Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "Catalogue price",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    formatRand(product.priceCents),
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 10.dp)
+                            )
+
+                            if (purchases.isEmpty()) {
+
+                                Text(
+                                    "No purchase history yet.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Text(
+                                    "Save a purchase containing this product to start tracking its price.",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+
+                            } else {
+
+                                val latest = purchases[0]
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Last price paid")
+                                    Text(
+                                        formatRand(latest.priceCents),
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                }
+
+                                Text(
+                                    "Purchased: ${formatDate(latest.timestamp)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Spacer(Modifier.height(10.dp))
+
+                                if (purchases.size >= 2) {
+
+                                    val previous = purchases[1]
+                                    val difference =
+                                        latest.priceCents - previous.priceCents
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Previous price")
+                                        Text(formatRand(previous.priceCents))
+                                    }
+
+                                    Text(
+                                        "Previous purchase: ${formatDate(previous.timestamp)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+
+                                    Spacer(Modifier.height(8.dp))
+
+                                    when {
+                                        difference > 0 -> {
+                                            Text(
+                                                "Price increased by ${formatRand(difference)}",
+                                                color = MaterialTheme.colorScheme.error,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                        }
+
+                                        difference < 0 -> {
+                                            Text(
+                                                "Price decreased by ${formatRand(-difference)}",
+                                                color = MaterialTheme.colorScheme.primary,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                        }
+
+                                        else -> {
+                                            Text(
+                                                "Price unchanged",
+                                                color = MaterialTheme.colorScheme.primary,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                        }
+                                    }
+
+                                } else {
+                                    Text(
+                                        "A second purchase is needed to compare prices.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+
+                                Spacer(Modifier.height(10.dp))
+
+                                Text(
+                                    "Recorded purchases: ${purchases.size}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
