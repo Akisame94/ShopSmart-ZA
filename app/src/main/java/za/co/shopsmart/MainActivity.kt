@@ -30,6 +30,17 @@ private const val PROMO_NONE = "NONE"
 private const val PROMO_UNIT = "UNIT"
 private const val PROMO_COMBO = "COMBO"
 
+private const val STORE_BEST_DEAL = "Best Deal"
+private val SHOPPING_STORES = listOf(
+    STORE_BEST_DEAL,
+    "Checkers",
+    "Pick n Pay",
+    "Checkstar",
+    "Makro",
+    "Spar",
+    "Woolworths"
+)
+
 data class Product(
     val id: Long,
     val name: String,
@@ -56,7 +67,8 @@ data class ShoppingEntry(
     val comboQuantity: Int = 2,
     val comboPriceCents: Int = 0,
     val promotionApplied: Boolean = false,
-    val actualPaidCents: Int? = null
+    val actualPaidCents: Int? = null,
+    val store: String = STORE_BEST_DEAL
 )
 
 data class PurchaseRecord(
@@ -375,6 +387,9 @@ fun ShopSmartApp() {
                                             )
                                     ) {
                                         Column(Modifier.padding(12.dp)) {
+                                            var storeMenuExpanded by remember(entry.id) {
+                                                mutableStateOf(false)
+                                            }
 
                                             Row(
                                                 verticalAlignment =
@@ -491,6 +506,49 @@ fun ShopSmartApp() {
                                                     saveAll()
                                                 }) {
                                                     Text("Remove")
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("Shopping at:")
+                                                Spacer(Modifier.width(8.dp))
+                                                Box {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            storeMenuExpanded = true
+                                                        }
+                                                    ) {
+                                                        Text(entry.store)
+                                                    }
+
+                                                    DropdownMenu(
+                                                        expanded = storeMenuExpanded,
+                                                        onDismissRequest = {
+                                                            storeMenuExpanded = false
+                                                        }
+                                                    ) {
+                                                        SHOPPING_STORES.forEach { storeOption ->
+                                                            DropdownMenuItem(
+                                                                text = { Text(storeOption) },
+                                                                onClick = {
+                                                                    val index =
+                                                                        shopping.indexOfFirst {
+                                                                            it.id == entry.id
+                                                                        }
+
+                                                                    if (index >= 0) {
+                                                                        shopping[index] =
+                                                                            entry.copy(store = storeOption)
+                                                                        saveAll()
+                                                                    }
+                                                                    storeMenuExpanded = false
+                                                                }
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
 
@@ -689,9 +747,15 @@ fun ShopSmartApp() {
                                                                 Arrangement.SpaceBetween,
                                                             modifier = Modifier.fillMaxWidth()
                                                         ) {
-                                                            Text(
-                                                                "${item.name} x${item.quantity}"
-                                                            )
+                                                            Column(Modifier.weight(1f)) {
+                                                                Text(
+                                                                    "${item.name} x${item.quantity}"
+                                                                )
+                                                                Text(
+                                                                    "Store: ${item.store}",
+                                                                    style = MaterialTheme.typography.bodySmall
+                                                                )
+                                                            }
                                                             Text(
                                                                 formatRand(
                                                                     item.actualPaidCents
@@ -1264,7 +1328,8 @@ fun loadShopping(context: Context): List<ShoppingEntry> {
                 actualPaidCents =
                     if (item.has("actualPaid") && !item.isNull("actualPaid")) {
                         item.optInt("actualPaid")
-                    } else null
+                    } else null,
+                store = item.optString("store", STORE_BEST_DEAL)
             )
         }
     } catch (_: Exception) {
@@ -1305,7 +1370,8 @@ fun loadHistory(context: Context): List<PurchaseRecord> {
                     actualPaidCents =
                         if (item.has("actualPaid") && !item.isNull("actualPaid")) {
                             item.optInt("actualPaid")
-                        } else null
+                        } else null,
+                    store = item.optString("store", STORE_BEST_DEAL)
                 )
             }
 
@@ -1370,6 +1436,7 @@ fun saveShopping(
                 put("comboQuantity", entry.comboQuantity)
                 put("comboPrice", entry.comboPriceCents)
                 put("promotionApplied", entry.promotionApplied)
+                put("store", entry.store)
 
                 if (entry.actualPaidCents != null) {
                     put("actualPaid", entry.actualPaidCents)
@@ -1414,6 +1481,7 @@ fun saveHistory(
                     put("comboQuantity", item.comboQuantity)
                     put("comboPrice", item.comboPriceCents)
                     put("promotionApplied", item.promotionApplied)
+                    put("store", item.store)
 
                     if (item.actualPaidCents != null) {
                         put("actualPaid", item.actualPaidCents)
