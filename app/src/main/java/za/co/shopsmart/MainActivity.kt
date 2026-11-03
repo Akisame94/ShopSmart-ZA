@@ -50,19 +50,23 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ShopSmartApp() {
     val context = LocalContext.current
+
     val prefs = remember {
-        context.getSharedPreferences("shopsmart_data", Context.MODE_PRIVATE)
+        context.getSharedPreferences(
+            "shopsmart_data",
+            Context.MODE_PRIVATE
+        )
     }
 
     val products = remember {
         mutableStateListOf<Product>().apply {
-            addAll(loadProducts(prefs))
+            addAll(loadProducts(context))
         }
     }
 
     val shopping = remember {
         mutableStateListOf<ShoppingEntry>().apply {
-            addAll(loadShopping(prefs))
+            addAll(loadShopping(context))
         }
     }
 
@@ -70,8 +74,8 @@ fun ShopSmartApp() {
     var showAddDialog by remember { mutableStateOf(false) }
 
     fun saveAll() {
-        saveProducts(prefs, products)
-        saveShopping(prefs, shopping)
+        saveProducts(context, products)
+        saveShopping(context, shopping)
     }
 
     fun addToShopping(product: Product) {
@@ -81,7 +85,9 @@ fun ShopSmartApp() {
 
         if (existing >= 0) {
             shopping[existing] =
-                shopping[existing].copy(quantity = shopping[existing].quantity + 1)
+                shopping[existing].copy(
+                    quantity = shopping[existing].quantity + 1
+                )
         } else {
             shopping.add(
                 ShoppingEntry(
@@ -94,6 +100,7 @@ fun ShopSmartApp() {
                 )
             )
         }
+
         saveAll()
     }
 
@@ -113,6 +120,7 @@ fun ShopSmartApp() {
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.onPrimary
                     )
+
                     Text(
                         "Your smarter shopping companion",
                         color = MaterialTheme.colorScheme.onPrimary
@@ -121,17 +129,21 @@ fun ShopSmartApp() {
             }
         }
     ) { padding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
+
             TabRow(selectedTabIndex = selectedTab) {
+
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
                     text = { Text("Shopping List") }
                 )
+
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
@@ -140,22 +152,30 @@ fun ShopSmartApp() {
             }
 
             if (selectedTab == 0) {
+
                 Column(Modifier.fillMaxSize()) {
+
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(12.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                            containerColor =
+                                MaterialTheme.colorScheme.primaryContainer
                         )
                     ) {
                         Column(Modifier.padding(16.dp)) {
+
                             Text("Estimated till total")
+
                             Text(
                                 formatRand(estimatedTotal),
                                 style = MaterialTheme.typography.headlineLarge
                             )
-                            Text("Only items not yet marked as bought are included.")
+
+                            Text(
+                                "Only items not yet marked as bought are included."
+                            )
                         }
                     }
 
@@ -166,46 +186,71 @@ fun ShopSmartApp() {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Your items", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            "Your items",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+
                         Text("${shopping.size} items")
                     }
 
                     if (shopping.isEmpty()) {
+
                         Text(
                             "Your shopping list is empty. Add products from your catalogue.",
                             modifier = Modifier.padding(20.dp)
                         )
+
                     } else {
+
                         LazyColumn(Modifier.weight(1f)) {
+
                             items(shopping, key = { it.id }) { entry ->
+
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                                        .padding(
+                                            horizontal = 12.dp,
+                                            vertical = 5.dp
+                                        )
                                 ) {
+
                                     Column(Modifier.padding(12.dp)) {
+
                                         Row(
-                                            verticalAlignment = Alignment.CenterVertically
+                                            verticalAlignment =
+                                                Alignment.CenterVertically
                                         ) {
+
                                             Checkbox(
                                                 checked = entry.bought,
                                                 onCheckedChange = { checked ->
-                                                    val index = shopping.indexOfFirst {
-                                                        it.id == entry.id
-                                                    }
+
+                                                    val index =
+                                                        shopping.indexOfFirst {
+                                                            it.id == entry.id
+                                                        }
+
                                                     if (index >= 0) {
                                                         shopping[index] =
-                                                            entry.copy(bought = checked)
+                                                            entry.copy(
+                                                                bought = checked
+                                                            )
                                                         saveAll()
                                                     }
                                                 }
                                             )
 
-                                            Column(Modifier.weight(1f)) {
+                                            Column(
+                                                Modifier.weight(1f)
+                                            ) {
+
                                                 Text(
                                                     entry.name,
                                                     style = MaterialTheme.typography.titleMedium
                                                 )
+
                                                 Text(
                                                     "${formatRand(entry.priceCents)} each"
                                                 )
@@ -213,31 +258,41 @@ fun ShopSmartApp() {
 
                                             Text(
                                                 formatRand(
-                                                    entry.priceCents * entry.quantity
+                                                    entry.priceCents *
+                                                        entry.quantity
                                                 ),
                                                 style = MaterialTheme.typography.titleMedium
                                             )
                                         }
 
                                         Row(
-                                            verticalAlignment = Alignment.CenterVertically
+                                            verticalAlignment =
+                                                Alignment.CenterVertically
                                         ) {
+
                                             Text("Quantity: ${entry.quantity}")
+
                                             Spacer(Modifier.weight(1f))
 
                                             TextButton(onClick = {
-                                                val index = shopping.indexOfFirst {
-                                                    it.id == entry.id
-                                                }
+
+                                                val index =
+                                                    shopping.indexOfFirst {
+                                                        it.id == entry.id
+                                                    }
+
                                                 if (index >= 0) {
+
                                                     if (entry.quantity > 1) {
                                                         shopping[index] =
                                                             entry.copy(
-                                                                quantity = entry.quantity - 1
+                                                                quantity =
+                                                                    entry.quantity - 1
                                                             )
                                                     } else {
                                                         shopping.removeAt(index)
                                                     }
+
                                                     saveAll()
                                                 }
                                             }) {
@@ -245,13 +300,17 @@ fun ShopSmartApp() {
                                             }
 
                                             TextButton(onClick = {
-                                                val index = shopping.indexOfFirst {
-                                                    it.id == entry.id
-                                                }
+
+                                                val index =
+                                                    shopping.indexOfFirst {
+                                                        it.id == entry.id
+                                                    }
+
                                                 if (index >= 0) {
                                                     shopping[index] =
                                                         entry.copy(
-                                                            quantity = entry.quantity + 1
+                                                            quantity =
+                                                                entry.quantity + 1
                                                         )
                                                     saveAll()
                                                 }
@@ -260,7 +319,9 @@ fun ShopSmartApp() {
                                             }
 
                                             TextButton(onClick = {
-                                                shopping.removeAll { it.id == entry.id }
+                                                shopping.removeAll {
+                                                    it.id == entry.id
+                                                }
                                                 saveAll()
                                             }) {
                                                 Text("Remove")
@@ -279,46 +340,68 @@ fun ShopSmartApp() {
                         }
                     }
                 }
+
             } else {
+
                 Column(Modifier.fillMaxSize()) {
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+
                         Text(
                             "Product Catalogue",
                             style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f)
                         )
-                        Button(onClick = { showAddDialog = true }) {
+
+                        Button(onClick = {
+                            showAddDialog = true
+                        }) {
                             Text("Add Product")
                         }
                     }
 
                     if (products.isEmpty()) {
+
                         Text(
                             "No products saved yet. Tap Add Product to get started.",
                             modifier = Modifier.padding(20.dp)
                         )
+
                     } else {
+
                         LazyColumn {
+
                             items(products, key = { it.id }) { product ->
+
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                                        .padding(
+                                            horizontal = 12.dp,
+                                            vertical = 5.dp
+                                        )
                                 ) {
+
                                     Row(
                                         modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalAlignment =
+                                            Alignment.CenterVertically
                                     ) {
-                                        Column(Modifier.weight(1f)) {
+
+                                        Column(
+                                            Modifier.weight(1f)
+                                        ) {
+
                                             Text(
                                                 product.name,
                                                 style = MaterialTheme.typography.titleMedium
                                             )
+
                                             Text(formatRand(product.priceCents))
                                         }
 
@@ -329,7 +412,9 @@ fun ShopSmartApp() {
                                         }
 
                                         TextButton(onClick = {
-                                            products.removeAll { it.id == product.id }
+                                            products.removeAll {
+                                                it.id == product.id
+                                            }
                                             saveAll()
                                         }) {
                                             Text("Delete")
@@ -345,9 +430,13 @@ fun ShopSmartApp() {
     }
 
     if (showAddDialog) {
+
         AddProductDialog(
-            onDismiss = { showAddDialog = false },
+            onDismiss = {
+                showAddDialog = false
+            },
             onAdd = { name, price ->
+
                 products.add(
                     Product(
                         id = System.nanoTime(),
@@ -355,6 +444,7 @@ fun ShopSmartApp() {
                         priceCents = price
                     )
                 )
+
                 saveAll()
                 showAddDialog = false
             }
@@ -367,15 +457,23 @@ fun AddProductDialog(
     onDismiss: () -> Unit,
     onAdd: (String, Int) -> Unit
 ) {
+
     var name by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
 
     AlertDialog(
+
         onDismissRequest = onDismiss,
-        title = { Text("Add a product") },
+
+        title = {
+            Text("Add a product")
+        },
+
         text = {
+
             Column {
+
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -388,7 +486,9 @@ fun AddProductDialog(
                 OutlinedTextField(
                     value = price,
                     onValueChange = { price = it },
-                    label = { Text("Price in Rand (e.g. 25.99)") },
+                    label = {
+                        Text("Price in Rand (e.g. 25.99)")
+                    },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Decimal
                     ),
@@ -403,28 +503,43 @@ fun AddProductDialog(
                 }
             }
         },
+
         confirmButton = {
+
             Button(onClick = {
+
                 val parsed = price.trim()
                     .replace(",", ".")
                     .toBigDecimalOrNull()
 
                 if (name.isBlank()) {
+
                     error = "Please enter a product name."
-                } else if (parsed == null || parsed <= BigDecimal.ZERO) {
+
+                } else if (
+                    parsed == null ||
+                    parsed <= BigDecimal.ZERO
+                ) {
+
                     error = "Please enter a valid price greater than zero."
+
                 } else {
+
                     val cents = parsed
                         .movePointRight(2)
                         .setScale(0, RoundingMode.HALF_UP)
                         .toInt()
+
                     onAdd(name.trim(), cents)
                 }
+
             }) {
                 Text("Save Product")
             }
         },
+
         dismissButton = {
+
             TextButton(onClick = onDismiss) {
                 Text("Cancel")
             }
@@ -441,36 +556,47 @@ fun formatRand(cents: Int): String {
 }
 
 fun loadProducts(context: Context): List<Product> {
+
     return try {
+
         val json = context.getSharedPreferences(
             "shopsmart_data",
             Context.MODE_PRIVATE
         ).getString("products", "[]") ?: "[]"
 
         val array = JSONArray(json)
+
         (0 until array.length()).map { i ->
+
             val item = array.getJSONObject(i)
+
             Product(
                 item.getLong("id"),
                 item.getString("name"),
                 item.getInt("price")
             )
         }
+
     } catch (_: Exception) {
         emptyList()
     }
 }
 
 fun loadShopping(context: Context): List<ShoppingEntry> {
+
     return try {
+
         val json = context.getSharedPreferences(
             "shopsmart_data",
             Context.MODE_PRIVATE
         ).getString("shopping", "[]") ?: "[]"
 
         val array = JSONArray(json)
+
         (0 until array.length()).map { i ->
+
             val item = array.getJSONObject(i)
+
             ShoppingEntry(
                 item.getLong("id"),
                 item.getLong("productId"),
@@ -480,14 +606,21 @@ fun loadShopping(context: Context): List<ShoppingEntry> {
                 item.getBoolean("bought")
             )
         }
+
     } catch (_: Exception) {
         emptyList()
     }
 }
 
-fun saveProducts(context: Context, products: List<Product>) {
+fun saveProducts(
+    context: Context,
+    products: List<Product>
+) {
+
     val array = JSONArray()
+
     products.forEach { product ->
+
         array.put(
             JSONObject().apply {
                 put("id", product.id)
@@ -500,12 +633,20 @@ fun saveProducts(context: Context, products: List<Product>) {
     context.getSharedPreferences(
         "shopsmart_data",
         Context.MODE_PRIVATE
-    ).edit().putString("products", array.toString()).apply()
+    ).edit()
+        .putString("products", array.toString())
+        .apply()
 }
 
-fun saveShopping(context: Context, shopping: List<ShoppingEntry>) {
+fun saveShopping(
+    context: Context,
+    shopping: List<ShoppingEntry>
+) {
+
     val array = JSONArray()
+
     shopping.forEach { entry ->
+
         array.put(
             JSONObject().apply {
                 put("id", entry.id)
@@ -521,5 +662,7 @@ fun saveShopping(context: Context, shopping: List<ShoppingEntry>) {
     context.getSharedPreferences(
         "shopsmart_data",
         Context.MODE_PRIVATE
-    ).edit().putString("shopping", array.toString()).apply()
+    ).edit()
+        .putString("shopping", array.toString())
+        .apply()
 }
