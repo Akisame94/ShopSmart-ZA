@@ -20,6 +20,8 @@ import org.json.JSONObject
 import java.util.Locale
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.text.SimpleDateFormat
+import java.util.Date
 
 data class Product(
     val id: Long,
@@ -34,6 +36,13 @@ data class ShoppingEntry(
     val priceCents: Int,
     val quantity: Int,
     val bought: Boolean
+)
+
+data class PurchaseRecord(
+    val id: Long,
+    val timestamp: Long,
+    val items: List<ShoppingEntry>,
+    val totalCents: Int
 )
 
 class MainActivity : ComponentActivity() {
@@ -51,13 +60,6 @@ class MainActivity : ComponentActivity() {
 fun ShopSmartApp() {
     val context = LocalContext.current
 
-    val prefs = remember {
-        context.getSharedPreferences(
-            "shopsmart_data",
-            Context.MODE_PRIVATE
-        )
-    }
-
     val products = remember {
         mutableStateListOf<Product>().apply {
             addAll(loadProducts(context))
@@ -70,12 +72,20 @@ fun ShopSmartApp() {
         }
     }
 
+    val history = remember {
+        mutableStateListOf<PurchaseRecord>().apply {
+            addAll(loadHistory(context))
+        }
+    }
+
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var selectedPurchase by remember { mutableStateOf<Long?>(null) }
 
     fun saveAll() {
         saveProducts(context, products)
         saveShopping(context, shopping)
+        saveHistory(context, history)
     }
 
     fun addToShopping(product: Product) {
@@ -84,10 +94,9 @@ fun ShopSmartApp() {
         }
 
         if (existing >= 0) {
-            shopping[existing] =
-                shopping[existing].copy(
-                    quantity = shopping[existing].quantity + 1
-                )
+            shopping[existing] = shopping[existing].copy(
+                quantity = shopping[existing].quantity + 1
+            )
         } else {
             shopping.add(
                 ShoppingEntry(
@@ -102,6 +111,30 @@ fun ShopSmartApp() {
         }
 
         saveAll()
+    }
+
+    fun completePurchase() {
+        val boughtItems = shopping.filter { it.bought }
+
+        if (boughtItems.isNotEmpty()) {
+            val total = boughtItems.sumOf {
+                it.priceCents * it.quantity
+            }
+
+            history.add(
+                0,
+                PurchaseRecord(
+                    id = System.nanoTime(),
+                    timestamp = System.currentTimeMillis(),
+                    items = boughtItems.toList(),
+                    totalCents = total
+                )
+            )
+
+            shopping.removeAll { it.bought }
+
+            saveAll()
+        }
     }
 
     val estimatedTotal = shopping
@@ -120,7 +153,6 @@ fun ShopSmartApp() {
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.onPrimary
                     )
-
                     Text(
                         "Your smarter shopping companion",
                         color = MaterialTheme.colorScheme.onPrimary
@@ -137,96 +169,154 @@ fun ShopSmartApp() {
         ) {
 
             TabRow(selectedTabIndex = selectedTab) {
-
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("Shopping List") }
+                    text = { Text("Shopping") }
                 )
-
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
                     text = { Text("Catalogue") }
                 )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = { Text("History") }
+                )
             }
 
-            if (selectedTab == 0) {
+            when (selectedTab) {
 
-                Column(Modifier.fillMaxSize()) {
+                0 -> {
+                    Column(Modifier.fillMaxSize()) {
 
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor =
-                                MaterialTheme.colorScheme.primaryContainer
-                        )
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-
-                            Text("Estimated till total")
-
-                            Text(
-                                formatRand(estimatedTotal),
-                                style = MaterialTheme.typography.headlineLarge
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor =
+                                    MaterialTheme.colorScheme.primaryContainer
                             )
-
-                            Text(
-                                "Only items not yet marked as bought are included."
-                            )
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text("Till total")
+                                Text(
+                                    formatRand(estimatedTotal),
+                                    style = MaterialTheme.typography.headlineLarge
+                                )
+                                Text("Total of items marked as bought.")
+                            }
                         }
-                    }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Your items",
-                            style = MaterialTheme.typography.titleLarge
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Your shopping list",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                            Text("${shopping.size} items")
+                        }
 
-                        Text("${shopping.size} items")
-                    }
+                        if (shopping.isEmpty()) {
+                            Text(
+                                "Your shopping list is empty. Add products from your catalogue.",
+                                modifier = Modifier.padding(20.dp)
+                            )
+                        } else {
 
-                    if (shopping.isEmpty()) {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                items(shopping, key = { it.id }) { entry ->
 
-                        Text(
-                            "Your shopping list is empty. Add products from your catalogue.",
-                            modifier = Modifier.padding(20.dp)
-                        )
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(
+                                                horizontal = 12.dp,
+                                                vertical = 5.dp
+                                            )
+                                    ) {
+                                        Column(Modifier.padding(12.dp)) {
 
-                    } else {
+                                            Row(
+                                                verticalAlignment =
+                                                    Alignment.CenterVertically
+                                            ) {
+                                                Checkbox(
+                                                    checked = entry.bought,
+                                                    onCheckedChange = { checked ->
+                                                        val index =
+                                                            shopping.indexOfFirst {
+                                                                it.id == entry.id
+                                                            }
 
-                        LazyColumn(Modifier.weight(1f)) {
+                                                        if (index >= 0) {
+                                                            shopping[index] =
+                                                                entry.copy(
+                                                                    bought = checked
+                                                                )
+                                                            saveAll()
+                                                        }
+                                                    }
+                                                )
 
-                            items(shopping, key = { it.id }) { entry ->
+                                                Column(
+                                                    Modifier.weight(1f)
+                                                ) {
+                                                    Text(
+                                                        entry.name,
+                                                        style = MaterialTheme.typography.titleMedium
+                                                    )
+                                                    Text(
+                                                        "${formatRand(entry.priceCents)} each"
+                                                    )
+                                                }
 
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(
-                                            horizontal = 12.dp,
-                                            vertical = 5.dp
-                                        )
-                                ) {
+                                                Text(
+                                                    formatRand(
+                                                        entry.priceCents *
+                                                            entry.quantity
+                                                    )
+                                                )
+                                            }
 
-                                    Column(Modifier.padding(12.dp)) {
+                                            Row(
+                                                verticalAlignment =
+                                                    Alignment.CenterVertically
+                                            ) {
+                                                Text("Quantity: ${entry.quantity}")
+                                                Spacer(Modifier.weight(1f))
 
-                                        Row(
-                                            verticalAlignment =
-                                                Alignment.CenterVertically
-                                        ) {
+                                                TextButton(onClick = {
+                                                    val index =
+                                                        shopping.indexOfFirst {
+                                                            it.id == entry.id
+                                                        }
 
-                                            Checkbox(
-                                                checked = entry.bought,
-                                                onCheckedChange = { checked ->
+                                                    if (index >= 0) {
+                                                        if (entry.quantity > 1) {
+                                                            shopping[index] =
+                                                                entry.copy(
+                                                                    quantity =
+                                                                        entry.quantity - 1
+                                                                )
+                                                        } else {
+                                                            shopping.removeAt(index)
+                                                        }
+                                                        saveAll()
+                                                    }
+                                                }) {
+                                                    Text("−")
+                                                }
 
+                                                TextButton(onClick = {
                                                     val index =
                                                         shopping.indexOfFirst {
                                                             it.id == entry.id
@@ -235,104 +325,119 @@ fun ShopSmartApp() {
                                                     if (index >= 0) {
                                                         shopping[index] =
                                                             entry.copy(
-                                                                bought = checked
+                                                                quantity =
+                                                                    entry.quantity + 1
                                                             )
                                                         saveAll()
                                                     }
+                                                }) {
+                                                    Text("+")
                                                 }
-                                            )
 
-                                            Column(
-                                                Modifier.weight(1f)
-                                            ) {
-
-                                                Text(
-                                                    entry.name,
-                                                    style = MaterialTheme.typography.titleMedium
-                                                )
-
-                                                Text(
-                                                    "${formatRand(entry.priceCents)} each"
-                                                )
+                                                TextButton(onClick = {
+                                                    shopping.removeAll {
+                                                        it.id == entry.id
+                                                    }
+                                                    saveAll()
+                                                }) {
+                                                    Text("Remove")
+                                                }
                                             }
 
-                                            Text(
-                                                formatRand(
-                                                    entry.priceCents *
-                                                        entry.quantity
-                                                ),
-                                                style = MaterialTheme.typography.titleMedium
-                                            )
+                                            if (entry.bought) {
+                                                Text(
+                                                    "Bought",
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
                                         }
+                                    }
+                                }
+                            }
+                        }
 
+                        if (shopping.any { it.bought }) {
+                            Button(
+                                onClick = { completePurchase() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            ) {
+                                Text("Save Purchase - ${formatRand(estimatedTotal)}")
+                            }
+                        }
+                    }
+                }
+
+                1 -> {
+                    Column(Modifier.fillMaxSize()) {
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Product Catalogue",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Button(onClick = {
+                                showAddDialog = true
+                            }) {
+                                Text("Add Product")
+                            }
+                        }
+
+                        if (products.isEmpty()) {
+                            Text(
+                                "No products saved yet. Tap Add Product to get started.",
+                                modifier = Modifier.padding(20.dp)
+                            )
+                        } else {
+
+                            LazyColumn {
+                                items(products, key = { it.id }) { product ->
+
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(
+                                                horizontal = 12.dp,
+                                                vertical = 5.dp
+                                            )
+                                    ) {
                                         Row(
+                                            modifier = Modifier.padding(12.dp),
                                             verticalAlignment =
                                                 Alignment.CenterVertically
                                         ) {
-
-                                            Text("Quantity: ${entry.quantity}")
-
-                                            Spacer(Modifier.weight(1f))
-
-                                            TextButton(onClick = {
-
-                                                val index =
-                                                    shopping.indexOfFirst {
-                                                        it.id == entry.id
-                                                    }
-
-                                                if (index >= 0) {
-
-                                                    if (entry.quantity > 1) {
-                                                        shopping[index] =
-                                                            entry.copy(
-                                                                quantity =
-                                                                    entry.quantity - 1
-                                                            )
-                                                    } else {
-                                                        shopping.removeAt(index)
-                                                    }
-
-                                                    saveAll()
-                                                }
-                                            }) {
-                                                Text("−")
+                                            Column(
+                                                Modifier.weight(1f)
+                                            ) {
+                                                Text(
+                                                    product.name,
+                                                    style = MaterialTheme.typography.titleMedium
+                                                )
+                                                Text(formatRand(product.priceCents))
                                             }
 
                                             TextButton(onClick = {
-
-                                                val index =
-                                                    shopping.indexOfFirst {
-                                                        it.id == entry.id
-                                                    }
-
-                                                if (index >= 0) {
-                                                    shopping[index] =
-                                                        entry.copy(
-                                                            quantity =
-                                                                entry.quantity + 1
-                                                        )
-                                                    saveAll()
-                                                }
+                                                addToShopping(product)
                                             }) {
-                                                Text("+")
+                                                Text("Add to list")
                                             }
 
                                             TextButton(onClick = {
-                                                shopping.removeAll {
-                                                    it.id == entry.id
+                                                products.removeAll {
+                                                    it.id == product.id
                                                 }
                                                 saveAll()
                                             }) {
-                                                Text("Remove")
+                                                Text("Delete")
                                             }
-                                        }
-
-                                        if (entry.bought) {
-                                            Text(
-                                                "Bought",
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
                                         }
                                     }
                                 }
@@ -341,83 +446,86 @@ fun ShopSmartApp() {
                     }
                 }
 
-            } else {
-
-                Column(Modifier.fillMaxSize()) {
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                2 -> {
+                    Column(Modifier.fillMaxSize()) {
 
                         Text(
-                            "Product Catalogue",
+                            "Purchase History",
                             style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.padding(16.dp)
                         )
 
-                        Button(onClick = {
-                            showAddDialog = true
-                        }) {
-                            Text("Add Product")
-                        }
-                    }
+                        if (history.isEmpty()) {
+                            Text(
+                                "No completed purchases yet. Your saved shopping trips will appear here.",
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        } else {
 
-                    if (products.isEmpty()) {
+                            LazyColumn {
+                                items(history, key = { it.id }) { record ->
 
-                        Text(
-                            "No products saved yet. Tap Add Product to get started.",
-                            modifier = Modifier.padding(20.dp)
-                        )
+                                    val expanded =
+                                        selectedPurchase == record.id
 
-                    } else {
-
-                        LazyColumn {
-
-                            items(products, key = { it.id }) { product ->
-
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(
-                                            horizontal = 12.dp,
-                                            vertical = 5.dp
-                                        )
-                                ) {
-
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment =
-                                            Alignment.CenterVertically
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(
+                                                horizontal = 12.dp,
+                                                vertical = 5.dp
+                                            )
                                     ) {
-
-                                        Column(
-                                            Modifier.weight(1f)
-                                        ) {
+                                        Column(Modifier.padding(14.dp)) {
 
                                             Text(
-                                                product.name,
+                                                formatDate(record.timestamp),
                                                 style = MaterialTheme.typography.titleMedium
                                             )
 
-                                            Text(formatRand(product.priceCents))
-                                        }
+                                            Text(
+                                                formatRand(record.totalCents),
+                                                style = MaterialTheme.typography.headlineSmall
+                                            )
 
-                                        TextButton(onClick = {
-                                            addToShopping(product)
-                                        }) {
-                                            Text("Add to list")
-                                        }
+                                            Text("${record.items.size} product lines")
 
-                                        TextButton(onClick = {
-                                            products.removeAll {
-                                                it.id == product.id
+                                            TextButton(onClick = {
+                                                selectedPurchase =
+                                                    if (expanded) null else record.id
+                                            }) {
+                                                Text(
+                                                    if (expanded) {
+                                                        "Hide items"
+                                                    } else {
+                                                        "View items"
+                                                    }
+                                                )
                                             }
-                                            saveAll()
-                                        }) {
-                                            Text("Delete")
+
+                                            if (expanded) {
+                                                HorizontalDivider()
+
+                                                record.items.forEach { item ->
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(vertical = 5.dp),
+                                                        horizontalArrangement =
+                                                            Arrangement.SpaceBetween
+                                                    ) {
+                                                        Text(
+                                                            "${item.name} x${item.quantity}"
+                                                        )
+                                                        Text(
+                                                            formatRand(
+                                                                item.priceCents *
+                                                                    item.quantity
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -430,13 +538,11 @@ fun ShopSmartApp() {
     }
 
     if (showAddDialog) {
-
         AddProductDialog(
             onDismiss = {
                 showAddDialog = false
             },
             onAdd = { name, price ->
-
                 products.add(
                     Product(
                         id = System.nanoTime(),
@@ -444,7 +550,6 @@ fun ShopSmartApp() {
                         priceCents = price
                     )
                 )
-
                 saveAll()
                 showAddDialog = false
             }
@@ -457,23 +562,15 @@ fun AddProductDialog(
     onDismiss: () -> Unit,
     onAdd: (String, Int) -> Unit
 ) {
-
     var name by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
 
     AlertDialog(
-
         onDismissRequest = onDismiss,
-
-        title = {
-            Text("Add a product")
-        },
-
+        title = { Text("Add a product") },
         text = {
-
             Column {
-
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -486,9 +583,7 @@ fun AddProductDialog(
                 OutlinedTextField(
                     value = price,
                     onValueChange = { price = it },
-                    label = {
-                        Text("Price in Rand (e.g. 25.99)")
-                    },
+                    label = { Text("Price in Rand (e.g. 25.99)") },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Decimal
                     ),
@@ -503,28 +598,20 @@ fun AddProductDialog(
                 }
             }
         },
-
         confirmButton = {
-
             Button(onClick = {
-
                 val parsed = price.trim()
                     .replace(",", ".")
                     .toBigDecimalOrNull()
 
                 if (name.isBlank()) {
-
                     error = "Please enter a product name."
-
                 } else if (
                     parsed == null ||
                     parsed <= BigDecimal.ZERO
                 ) {
-
                     error = "Please enter a valid price greater than zero."
-
                 } else {
-
                     val cents = parsed
                         .movePointRight(2)
                         .setScale(0, RoundingMode.HALF_UP)
@@ -532,14 +619,11 @@ fun AddProductDialog(
 
                     onAdd(name.trim(), cents)
                 }
-
             }) {
                 Text("Save Product")
             }
         },
-
         dismissButton = {
-
             TextButton(onClick = onDismiss) {
                 Text("Cancel")
             }
@@ -555,10 +639,15 @@ fun formatRand(cents: Int): String {
     )
 }
 
+fun formatDate(timestamp: Long): String {
+    return SimpleDateFormat(
+        "dd MMM yyyy, HH:mm",
+        Locale("en", "ZA")
+    ).format(Date(timestamp))
+}
+
 fun loadProducts(context: Context): List<Product> {
-
     return try {
-
         val json = context.getSharedPreferences(
             "shopsmart_data",
             Context.MODE_PRIVATE
@@ -567,25 +656,20 @@ fun loadProducts(context: Context): List<Product> {
         val array = JSONArray(json)
 
         (0 until array.length()).map { i ->
-
             val item = array.getJSONObject(i)
-
             Product(
                 item.getLong("id"),
                 item.getString("name"),
                 item.getInt("price")
             )
         }
-
     } catch (_: Exception) {
         emptyList()
     }
 }
 
 fun loadShopping(context: Context): List<ShoppingEntry> {
-
     return try {
-
         val json = context.getSharedPreferences(
             "shopsmart_data",
             Context.MODE_PRIVATE
@@ -594,9 +678,7 @@ fun loadShopping(context: Context): List<ShoppingEntry> {
         val array = JSONArray(json)
 
         (0 until array.length()).map { i ->
-
             val item = array.getJSONObject(i)
-
             ShoppingEntry(
                 item.getLong("id"),
                 item.getLong("productId"),
@@ -606,21 +688,52 @@ fun loadShopping(context: Context): List<ShoppingEntry> {
                 item.getBoolean("bought")
             )
         }
-
     } catch (_: Exception) {
         emptyList()
     }
 }
 
-fun saveProducts(
-    context: Context,
-    products: List<Product>
-) {
+fun loadHistory(context: Context): List<PurchaseRecord> {
+    return try {
+        val json = context.getSharedPreferences(
+            "shopsmart_data",
+            Context.MODE_PRIVATE
+        ).getString("history", "[]") ?: "[]"
 
+        val array = JSONArray(json)
+
+        (0 until array.length()).map { i ->
+            val record = array.getJSONObject(i)
+            val itemArray = record.getJSONArray("items")
+
+            val savedItems = (0 until itemArray.length()).map { j ->
+                val item = itemArray.getJSONObject(j)
+                ShoppingEntry(
+                    item.getLong("id"),
+                    item.getLong("productId"),
+                    item.getString("name"),
+                    item.getInt("price"),
+                    item.getInt("quantity"),
+                    item.getBoolean("bought")
+                )
+            }
+
+            PurchaseRecord(
+                record.getLong("id"),
+                record.getLong("timestamp"),
+                savedItems,
+                record.getInt("total")
+            )
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
+fun saveProducts(context: Context, products: List<Product>) {
     val array = JSONArray()
 
     products.forEach { product ->
-
         array.put(
             JSONObject().apply {
                 put("id", product.id)
@@ -642,11 +755,9 @@ fun saveShopping(
     context: Context,
     shopping: List<ShoppingEntry>
 ) {
-
     val array = JSONArray()
 
     shopping.forEach { entry ->
-
         array.put(
             JSONObject().apply {
                 put("id", entry.id)
@@ -664,5 +775,46 @@ fun saveShopping(
         Context.MODE_PRIVATE
     ).edit()
         .putString("shopping", array.toString())
+        .apply()
+}
+
+fun saveHistory(
+    context: Context,
+    history: List<PurchaseRecord>
+) {
+    val array = JSONArray()
+
+    history.forEach { record ->
+
+        val itemArray = JSONArray()
+
+        record.items.forEach { item ->
+            itemArray.put(
+                JSONObject().apply {
+                    put("id", item.id)
+                    put("productId", item.productId)
+                    put("name", item.name)
+                    put("price", item.priceCents)
+                    put("quantity", item.quantity)
+                    put("bought", item.bought)
+                }
+            )
+        }
+
+        array.put(
+            JSONObject().apply {
+                put("id", record.id)
+                put("timestamp", record.timestamp)
+                put("total", record.totalCents)
+                put("items", itemArray)
+            }
+        )
+    }
+
+    context.getSharedPreferences(
+        "shopsmart_data",
+        Context.MODE_PRIVATE
+    ).edit()
+        .putString("history", array.toString())
         .apply()
 }
